@@ -5,6 +5,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as s3n from "aws-cdk-lib/aws-s3-notifications";
 import { Construct } from "constructs";
 import * as path from "path";
+import { execSync } from "child_process";
 
 export class PageindexAwsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -15,10 +16,26 @@ export class PageindexAwsStack extends cdk.Stack {
       autoDeleteObjects: true,
     });
 
-    const fn = new lambda.DockerImageFunction(this, "PageIndexFunction", {
-      code: lambda.DockerImageCode.fromImageAsset(
-        path.join(__dirname, "../lambda")
-      ),
+    const lambdaDir = path.join(__dirname, "../lambda");
+    const outputDir = path.join(__dirname, "../lambda/.build");
+
+    const fn = new lambda.Function(this, "PageIndexFunction", {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      architecture: lambda.Architecture.ARM_64,
+      handler: "handler.lambda_handler",
+      code: lambda.Code.fromAsset(lambdaDir, {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          local: {
+            tryBundle(outputDir: string): boolean {
+              execSync(`bash ${lambdaDir}/build.sh ${outputDir}`, {
+                stdio: "inherit",
+              });
+              return true;
+            },
+          },
+        },
+      }),
       memorySize: 2048,
       timeout: cdk.Duration.minutes(15),
       environment: {
@@ -26,14 +43,16 @@ export class PageindexAwsStack extends cdk.Stack {
           "bedrock/us.anthropic.claude-sonnet-4-6-20250929-v1:0",
         OUTPUT_PREFIX: "indexes/",
       },
-      architecture: lambda.Architecture.X86_64,
     });
 
     bucket.grantReadWrite(fn);
 
     fn.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+        actions: [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+        ],
         resources: ["arn:aws:bedrock:*::foundation-model/*"],
       })
     );
@@ -48,3 +67,4 @@ export class PageindexAwsStack extends cdk.Stack {
     new cdk.CfnOutput(this, "FunctionName", { value: fn.functionName });
   }
 }
+
