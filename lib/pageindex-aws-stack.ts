@@ -40,8 +40,9 @@ export class PageindexAwsStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(15),
       environment: {
         PAGEINDEX_MODEL:
-          "bedrock/us.anthropic.claude-sonnet-4-6-20250929-v1:0",
+          "bedrock/jp.anthropic.claude-haiku-4-5-20251001-v1:0",
         OUTPUT_PREFIX: "indexes/",
+        BUCKET_NAME: bucket.bucketName,
       },
     });
 
@@ -53,7 +54,10 @@ export class PageindexAwsStack extends cdk.Stack {
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream",
         ],
-        resources: ["arn:aws:bedrock:*::foundation-model/*"],
+        resources: [
+          "arn:aws:bedrock:*::foundation-model/*",
+          `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
+        ],
       })
     );
 
@@ -65,6 +69,16 @@ export class PageindexAwsStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, "BucketName", { value: bucket.bucketName });
     new cdk.CfnOutput(this, "FunctionName", { value: fn.functionName });
+
+    // Allow a specific IAM role to upload test PDFs and invoke Lambda
+    const testRoleArn = this.node.tryGetContext("testRoleArn") as
+      | string
+      | undefined;
+    if (testRoleArn) {
+      const principal = new iam.ArnPrincipal(testRoleArn);
+      bucket.grantReadWrite(principal);
+      fn.grantInvoke(principal);
+    }
   }
 }
 
