@@ -57,6 +57,13 @@ def _process_pdf(bucket, key):
 
 
 def lambda_handler(event, context):
+    # Mode 0: Called from Step Functions Choice (single Lambda path)
+    if event.get("_source") == "stepfunctions-single":
+        bucket = event["bucket"]
+        key = event["key"]
+        result = _process_pdf(bucket, key)
+        return {"statusCode": 200, "body": json.dumps(result)}
+
     # Mode 1: S3 event notification
     if "Records" in event:
         record = event["Records"][0]["s3"]
@@ -65,7 +72,45 @@ def lambda_handler(event, context):
         result = _process_pdf(bucket, key)
         return {"statusCode": 200, "body": json.dumps(result)}
 
-    # Mode 2: Direct invoke with base64-encoded PDF
+    # Mode 2: Start Step Functions workflow (check before pdf_base64)
+    if "start_workflow" in event:
+        sfn_client = boto3.client("stepfunctions")
+        sfn_arn = event.get("workflow_arn", os.environ.get("WORKFLOW_ARN", ""))
+        bucket = event.get("bucket", BUCKET)
+        key = event["start_workflow"]
+
+        if "pdf_base64" in event:
+            pdf_data = base64.b64decode(event["pdf_base64"])
+            s3.put_object(Bucket=bucket, Key=key, Body=pdf_data, ContentType="application/pdf")
+            print(f"Uploaded {len(pdf_data)} bytes to s3://{bucket}/{key}")
+
+        resp = sfn_client.start_execution(
+            stateMachineArn=sfn_arn,
+            input=json.dumps({"bucket": bucket, "key": key}),
+        )
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"executionArn": resp["executionArn"]}),
+        }
+
+    # Mode 3: Check Step Functions execution status
+    if "check_execution" in event:
+        sfn_client = boto3.client("stepfunctions")
+        resp = sfn_client.describe_execution(executionArn=event["check_execution"])
+        result = {
+            "status": resp["status"],
+            "startDate": resp["startDate"].isoformat(),
+        }
+        if resp["status"] != "RUNNING":
+            result["stopDate"] = resp.get("stopDate", "").isoformat() if resp.get("stopDate") else None
+            if "output" in resp:
+                result["output"] = json.loads(resp["output"])
+            if "error" in resp:
+                result["error"] = resp["error"]
+                result["cause"] = resp.get("cause", "")
+        return {"statusCode": 200, "body": json.dumps(result, default=str)}
+
+    # Mode 4: Direct invoke with base64-encoded PDF (single Lambda)
     if "pdf_base64" in event:
         bucket = event.get("bucket", BUCKET)
         filename = event.get("filename", "direct-upload.pdf")
@@ -79,7 +124,7 @@ def lambda_handler(event, context):
         result = _process_pdf(bucket, key)
         return {"statusCode": 200, "body": json.dumps(result)}
 
-    # Mode 3: Get index from S3
+    # Mode 5: Get index from S3
     if "get_index" in event:
         bucket = event.get("bucket", BUCKET)
         key = event["get_index"]
@@ -87,7 +132,7 @@ def lambda_handler(event, context):
         content = obj["Body"].read().decode("utf-8")
         return {"statusCode": 200, "body": content}
 
-    # Mode 4: List indexes
+    # Mode 6: List indexes
     if event.get("list_indexes"):
         bucket = event.get("bucket", BUCKET)
         resp = s3.list_objects_v2(Bucket=bucket, Prefix=OUTPUT_PREFIX)
