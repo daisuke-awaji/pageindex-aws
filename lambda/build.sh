@@ -18,8 +18,12 @@ git clone --depth 1 https://github.com/VectifyAI/PageIndex.git "$TMPDIR/PageInde
 cp -r "$TMPDIR/PageIndex/pageindex" "$OUTPUT_DIR/pageindex"
 rm -rf "$TMPDIR"
 
-echo "==> Copying handler"
+echo "==> Copying handlers"
 cp "$SCRIPT_DIR/handler.py" "$OUTPUT_DIR/"
+cp "$SCRIPT_DIR/parse_and_structure.py" "$OUTPUT_DIR/"
+cp "$SCRIPT_DIR/summarize_node.py" "$OUTPUT_DIR/"
+cp "$SCRIPT_DIR/assemble.py" "$OUTPUT_DIR/"
+cp "$SCRIPT_DIR/count_pages.py" "$OUTPUT_DIR/"
 
 echo "==> Trimming unnecessary files"
 find "$OUTPUT_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
